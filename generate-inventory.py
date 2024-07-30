@@ -7,69 +7,65 @@ import subprocess
 import argparse
 import netifaces as ni
 
-
+# Global variables
 VPN_interface = 'wg0'
-# Get local VPN_interface IP, to seperate from nodes
 local_IP = ni.ifaddresses(VPN_interface)[ni.AF_INET][0]['addr']
 
 
 def nmaprun(subnet,outputfile):
     # Runs nmap on specified vpn subnet
+    print(f"Running nmap over {subnet}...")
     command = f"sudo nmap -sP {subnet} -oX {outputfile} &>/dev/null"
     subprocess.run(command, shell=True)
+    print("Nmap scan complete.")
+    print(f"XML output saved to {outputfile}")
 
 def parseXML(xmlfile):
     # Parses XML file for host list
-    peerlist = []
+    peerlist = {}
     with open(xmlfile, 'r') as file:
         # Create element tree object and get root element
         tree = ET.parse(xmlfile)
         root = tree.getroot()
         # XML parsing to get hostname and associated IP addr
         for host in root.iter('host'):
-            connection = {}
-            for name in host.findall('hostnames/hostname'):
+            for name in host.iter('hostname'):
                 hostname = name.get('name')
-                connection['hostname'] = hostname
-            for address in host.findall('address'):
-                IP = address.get('addr')
-                if IP == local_IP:
-                    continue
-                else:
-                    connection['address'] = IP
-            if connection:
-                peerlist.append(connection)
+                for address in host.iter('address'):
+                    IP = address.get('addr')
+                    peerlist[hostname]= IP
     return peerlist
 
-
-def generate_ansible_inventory():
+def generate_ansible_inventory(peerlist):
     # Creates ansible inventory from list of dicts, and
     # convert to Ansible-friendly yaml format
-    peers = get_peers()
+    print(yaml.dump(peerlist))
 
-    if peers:
-        inventory = {}
-        for peer in peers:
-            a = 1
+def generate_host_file(peerlist, hostfile):
+    # Create /etc/hosts file with updated peerlist
+
+    template = """127.0.0.1   localhost localhost.localdomain localhost4 localhost4.localdomain4 \n::1         localhost localhost.localdomain localhost6 localhost6.localdomain6 \n\n# RPi Units\n"""
+    for key, value in peerlist.items():
+        template += key + "\t\t" + value + "\n"
+    # Write to /etc/hosts
+    with open(hostfile, 'w') as file:
+        file.write(template.expandtabs(4))
+        
 
 def main():
 
     subnet = '10.10.10.0/24'
-    nmapresult = '/etc/ansible/dynamic-inventory/nmap-test.xml'
+    nmapresult = './nmap-test.xml'
+    hostfile = 'hostfile.example'
 
     # nmap over specified subnet, comment out to make static
-    print(f"Running nmap over {subnet}...")
-    #nmaprun(subnet,nmapresult)
-    print("Nmap scan complete.")
-    print(f"XML output saved to {nmapresult}")
+    nmaprun(subnet,nmapresult)
 
     # Create dict of peers
     peerlist = parseXML(nmapresult)
 
-
-    #inventory = yaml.safe_load(a)
-
-    print(peerlist)
+    #generate_anisble_inventory(peerlist)
+    generate_host_file(peerlist,hostfile)
 
 
 main()
